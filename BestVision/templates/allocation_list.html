@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h1>Resource Allocations</h1>
+
+
+<a href="{% url 'optimize_resources' %}" class="button">Run Optimization</a>
+
+<table>
+    <thead>
+        <tr>
+            <th>Child</th>
+            <th>Resource</th>
+            <th>Quantity</th>
+            <th>Date Allocated</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for allocation in allocations %}
+        <tr>
+            <td>{{ allocation.child.name }}</td>
+            <td>{{ allocation.resource.name }}</td>
+            <td>{{ allocation.quantity }} {{ allocation.resource.unit }}</td>
+            <td>{{ allocation.date_allocated }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1>Orphanage Resource Management</h1>
+    
+    <div class="section">
+        <h2>Children</h2>
+        <a href="{% url 'add_child' %}" class="button">Add New Child</a>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Age</th>
+                    <th>Admission Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for child in children %}
+                <tr>
+                    <td>{{ child.name }}</td>
+                    <td>{{ child.age }}</td>
+                    <td>{{ child.admission_date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Resources</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Available Quantity</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for resource in resources %}
+            <tr>
+                <td>{{ resource.name }}</td>
+                <td>{{ resource.get_type_display }}</td>
+                <td>{{ resource.quantity }}</td>
+                <td>{{ resource.unit }}</td>
+                <td>
+                    <a href="{% url 'update_donation' resource.id %}" class="button">Add Donation</a>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Recent Allocations</h2>
+        <a href="{% url 'optimize_resources' %}" class="button">Run Optimization</a>
+        <table>
+            <thead>
+                <tr>
+                    <th>Child</th>
+                    <th>Resource</th>
+                    <th>Quantity</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for allocation in allocations %}
+                <tr>
+                    <td>{{ allocation.child.name }}</td>
+                    <td>{{ allocation.resource.name }}</td>
+                    <td>{{ allocation.quantity }} {{ allocation.resource.unit }}</td>
+                    <td>{{ allocation.date_allocated }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
