@@ -23,17 +23,21 @@ def optimize_resources(request):
     
     # Decision variables with appropriate bounds
     allocations = {}
+    valid_combinations = []  # Track valid child-resource combinations
+    
     for c in children:
         for r in resources:
+            if r.gender_specific != 'ALL' and c.gender != r.gender_specific:
+                continue
+                
+            valid_combinations.append((c.id, r.id))
             if r.type in integral_types:
-                # Integer variables for clothing and education
                 allocations[c.id, r.id] = LpVariable(
                     f"allocation_{c.id}_{r.id}", 
                     lowBound=0, 
                     cat='Integer'
                 )
             else:
-                # Continuous variables for food and money
                 allocations[c.id, r.id] = LpVariable(
                     f"allocation_{c.id}_{r.id}", 
                     lowBound=0
@@ -44,22 +48,33 @@ def optimize_resources(request):
                                      resource_types,
                                      lowBound=0)
     
-    # Objective function
+    # Objective function - only include valid combinations
     model += lpSum(allocations[c.id, r.id] * float(r.cost_per_unit) 
-                   for c in children for r in resources)
+                   for c in children for r in resources 
+                   if (c.id, r.id) in valid_combinations)
     
-    # Resource availability constraints
+    # Resource availability constraints - only include valid combinations
     for resource in resources:
-        model += lpSum(allocations[c.id, resource.id] for c in children) <= float(resource.quantity)
-    
+        model += lpSum(allocations[c.id, resource.id] 
+                      for c in children 
+                      if (c.id, resource.id) in valid_combinations) <= float(resource.quantity)
+            
     # Fairness constraints with type-specific handling
     for resource in resources:
         for child in children:
+            # Skip if gender-specific resource doesn't match child's gender
+            if (child.id, resource.id) not in valid_combinations:
+                continue
+                
             # Base fairness constraint
             model += allocations[child.id, resource.id] >= min_allocations[resource.type]
             
             # Fairness between children
             for other_child in children:
+                # Skip comparisons with invalid combinations
+                if (other_child.id, resource.id) not in valid_combinations:
+                    continue
+                    
                 if child != other_child:
                     if resource.type in integral_types:
                         # For integral resources, allow difference of at most 1 unit
@@ -76,6 +91,9 @@ def optimize_resources(request):
         min_per_child = total_available / len(children)
         
         for child in children:
+            if (child.id, requirement.resource.id) not in valid_combinations:
+                continue
+                
             if requirement.resource.type in integral_types:
                 # For integral resources, round down the minimum requirement
                 model += allocations[child.id, requirement.resource.id] >= int(min(requirement.quantity_per_child, min_per_child))
@@ -99,6 +117,9 @@ def optimize_resources(request):
         
         for child in children:
             for resource in resources:
+                if resource.gender_specific != 'ALL' and child.gender != resource.gender_specific:
+                    continue
+
                 allocation_value = value(allocations[child.id, resource.id])
                 if allocation_value > 0:
                     if resource.type in integral_types:
