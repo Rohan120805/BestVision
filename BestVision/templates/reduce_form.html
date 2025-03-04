@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h2>Reduce Resource: {{ resource.name }}</h2>
+    <div class="resource-info">
+        <p>Current Quantity: {{ resource.quantity }} {{ resource.unit }}</p>
+        <p>Type: {{ resource.get_type_display }}</p>
+    </div>
+    
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="quantity">Quantity to Reduce ({{ resource.unit }}):</label>
+            <input type="number" id="quantity" name="quantity" step="0.01" min="0" max="{{ resource.quantity }}" required>
+        </div>
+        <button type="submit" class="button">Reduce</button>
+        <a href="{% url 'home' %}" class="button secondary">Cancel</a>
+    </form>
+</div>
+{% endblock %}

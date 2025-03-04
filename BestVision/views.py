@@ -197,3 +197,16 @@ def home(request):
         'requirements': Requirement.objects.all()
     }
     return render(request, 'home.html', context)
+
+def reduce_resource(request, pk):
+    resource = get_object_or_404(Resource, pk=pk)
+    if request.method == 'POST':
+        quantity = float(request.POST.get('quantity', 0))
+        if quantity <= resource.quantity:
+            resource.quantity -= quantity
+            resource.save()
+            messages.success(request, f'Reduced {quantity} {resource.unit} from {resource.name}')
+            return redirect('home')
+        else:
+            messages.error(request, f'Cannot reduce more than available quantity ({resource.quantity} {resource.unit})')
+    return render(request, 'reduce_form.html', {'resource': resource})

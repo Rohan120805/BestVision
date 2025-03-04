@@ -27,6 +27,7 @@
                 <td>{{ resource.get_gender_specific_display }}</td>
                 <td>
                     <a href="{% url 'update_donation' resource.id %}" class="button">Add Donation</a>
+                    <a href="{% url 'reduce_resource' resource.id %}" class="button">Update</a>
                 </td>
             </tr>
             {% endfor %}

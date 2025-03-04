@@ -7,6 +7,7 @@ urlpatterns = [
     path('donation/<int:pk>/', views.update_donation, name='update_donation'),
     path('optimize/', views.optimize_resources, name='optimize_resources'),
     path('allocations/', views.allocation_list, name='allocation_list'),
+    path('reduce-resource/<int:pk>/', views.reduce_resource, name='reduce_resource'),
 ]
 
 
