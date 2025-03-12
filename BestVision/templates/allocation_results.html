@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h2>Optimization Results</h2>
+    
+    <div class="section">
+        <h3>Resource Allocations</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Child</th>
+                    <th>Resource</th>
+                    <th>Allocated Quantity</th>
+                    <th>Unit</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for allocation in allocations %}
+                <tr>
+                    <td>{{ allocation.child.name }}</td>
+                    <td>{{ allocation.resource_name }}</td>
+                    <td>{{ allocation.quantity }}</td>
+                    <td>{{ allocation.unit }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <a href="{% url 'resource_input' %}" class="button">New Optimization</a>
+    <a href="{% url 'home' %}" class="button">Back to Home</a>
+</div>
+{% endblock %}

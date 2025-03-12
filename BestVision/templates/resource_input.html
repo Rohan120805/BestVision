@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h2>Resource Optimization Input</h2>
+    <form id="optimizationForm" method="post" action="{% url 'optimize_resources' %}">
+        {% csrf_token %}
+        
+        <div class="section">
+            <h3>Available Resources</h3>
+            <div id="resources-container">
+                <div class="resource-input">
+                    <h4>Resource 1</h4>
+                    <div class="form-group">
+                        <label>Name:</label>
+                        <input type="text" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Quantity:</label>
+                        <input type="number" step="0.01" name="quantity" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Type:</label>
+                        <select name="type" required>
+                            <option value="">None</option>
+                            <option value="FOOD">Food</option>
+                            <option value="CLOTHING">Clothing</option>
+                            <option value="EDUCATION">Education</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Gender Specific:</label>
+                        <select name="gender_specific" required>
+                            <option value="ALL">All</option>
+                            <option value="MALE">Male</option>
+                            <option value="FEMALE">Female</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Unit:</label>
+                        <input type="text" name="unit" required>
+                    </div>
+                </div>
+            </div>
+            <button type="button" onclick="addResource()">Add Another Resource</button>
+        </div>
+
+        <div class="section">
+            <h3>Resource Requirements</h3>
+            <div id="requirements-container">
+                <div class="requirement-input">
+                    <h4>Requirement 1</h4>
+                    <div class="form-group">
+                        <label>Resource Name:</label>
+                        <input type="text" name="resource_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Quantity per Child:</label>
+                        <input type="number" step="0.01" name="quantity_per_child" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Frequency:</label>
+                        <select name="frequency" required>
+                            <option value="DAILY">Daily</option>
+                            <option value="WEEKLY">Weekly</option>
+                            <option value="MONTHLY">Monthly</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <button type="button" onclick="addRequirement()">Add Another Requirement</button>
+        </div>
+
+        <button type="submit">Run Optimization</button>
+    </form>
+</div>
+
+<script>
+function addResource() {
+    const container = document.getElementById('resources-container');
+    const template = container.querySelector('.resource-input').cloneNode(true);
+    const count = container.children.length + 1;
+    template.querySelector('h4').textContent = `Resource ${count}`;
+    
+    // Reset form values
+    template.querySelectorAll('input').forEach(input => input.value = '');
+    template.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+    
+    container.appendChild(template);
+}
+
+function addRequirement() {
+    const container = document.getElementById('requirements-container');
+    const template = container.querySelector('.requirement-input').cloneNode(true);
+    const count = container.children.length + 1;
+    template.querySelector('h4').textContent = `Requirement ${count}`;
+    
+    // Reset form values
+    template.querySelectorAll('input').forEach(input => input.value = '');
+    template.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
+    
+    container.appendChild(template);
+}
+
+document.getElementById('optimizationForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    // Collect resources data
+    const resources = [];
+    document.querySelectorAll('.resource-input').forEach(resource => {
+        resources.push({
+            name: resource.querySelector('[name="name"]').value,
+            quantity: resource.querySelector('[name="quantity"]').value,
+            type: resource.querySelector('[name="type"]').value,
+            gender_specific: resource.querySelector('[name="gender_specific"]').value,
+            unit: resource.querySelector('[name="unit"]').value
+        });
+    });
+
+    // Collect requirements data
+    const requirements = [];
+    document.querySelectorAll('.requirement-input').forEach(requirement => {
+        requirements.push({
+            resource_name: requirement.querySelector('[name="resource_name"]').value,
+            quantity_per_child: requirement.querySelector('[name="quantity_per_child"]').value,
+            frequency: requirement.querySelector('[name="frequency"]').value
+        });
+    });
+
+    // Create hidden inputs for the collected data
+    const resourcesInput = document.createElement('input');
+    resourcesInput.type = 'hidden';
+    resourcesInput.name = 'resources';
+    resourcesInput.value = JSON.stringify(resources);
+    
+    const requirementsInput = document.createElement('input');
+    requirementsInput.type = 'hidden';
+    requirementsInput.name = 'requirements';
+    requirementsInput.value = JSON.stringify(requirements);
+    
+    this.appendChild(resourcesInput);
+    this.appendChild(requirementsInput);
+    
+    this.submit();
+});
+</script>
+{% endblock %}

@@ -1,177 +1,150 @@
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import render
 from pulp import *
-from .models import Child, Resource, Requirement, Allocation
+from .models import Child
 from django.contrib import messages
 from django.shortcuts import redirect
-from django.views.generic.edit import CreateView, UpdateView
+from django.views.generic.edit import CreateView
 from django.urls import reverse_lazy
+from dataclasses import dataclass
+from django.views.decorators.csrf import csrf_protect
+from django.utils.decorators import method_decorator
 
+@dataclass
+class ResourceInput:
+    name: str
+    quantity: float
+    type: str
+    gender_specific: str
+    unit: str
+
+@dataclass
+class RequirementInput:
+    resource_name: str
+    quantity_per_child: float
+    frequency: str
+
+@csrf_protect
 def optimize_resources(request):
-    # Create optimization model
-    model = LpProblem("Orphanage_Resource_Allocation", LpMinimize)
-    
-    # Get all data
-    children = Child.objects.all()
-    resources = Resource.objects.all()
-    requirements = Requirement.objects.all()
-    
-    # Get unique resource types
-    resource_types = list(resources.values_list('type', flat=True).distinct())
-    
-    # Separate integral and divisible resources
-    integral_types = ['CLOTHING', 'EDUCATION']
-    
-    # Decision variables with appropriate bounds
-    allocations = {}
-    valid_combinations = []  # Track valid child-resource combinations
-    
-    for c in children:
+    if request.method != 'POST':
+        return render(request, 'resource_input.html')
+
+    try:
+        # Parse JSON data
+        resources_data = json.loads(request.POST.get('resources', '[]'))
+        requirements_data = json.loads(request.POST.get('requirements', '[]'))
+        
+        # Convert input to ResourceInput objects
+        resources = [
+            ResourceInput(
+                name=data['name'],
+                quantity=float(data['quantity']),
+                type=data['type'],
+                gender_specific=data['gender_specific'],
+                unit=data['unit']
+            ) for data in resources_data
+        ]
+
+        # Convert input to RequirementInput objects
+        requirements = [
+            RequirementInput(
+                resource_name=data['resource_name'],
+                quantity_per_child=float(data['quantity_per_child']),
+                frequency=data['frequency']
+            ) for data in requirements_data
+        ]
+
+        # Create optimization model
+        model = LpProblem("Orphanage_Resource_Allocation", LpMinimize)
+        
+        # Get children from database
+        children = Child.objects.all()
+        
+        # Separate integral and divisible resources
+        integral_types = ['CLOTHING', 'EDUCATION']
+        
+        # Decision variables
+        allocations = {}
+        
+        # Create variables and add constraints
         for r in resources:
-            if r.gender_specific != 'ALL' and c.gender != r.gender_specific:
-                continue
-                
-            valid_combinations.append((c.id, r.id))
-            if r.type in integral_types:
-                allocations[c.id, r.id] = LpVariable(
-                    f"allocation_{c.id}_{r.id}", 
-                    lowBound=0, 
-                    cat='Integer'
-                )
-            else:
-                allocations[c.id, r.id] = LpVariable(
-                    f"allocation_{c.id}_{r.id}", 
-                    lowBound=0
-                )
-    
-    # Fairness variables
-    min_allocations = LpVariable.dicts("min_allocation",
-                                     resource_types,
-                                     lowBound=0)
-    
-    # Objective function - only include valid combinations
-    model += lpSum(allocations[c.id, r.id] * float(r.cost_per_unit) 
-                   for c in children for r in resources 
-                   if (c.id, r.id) in valid_combinations)
-    
-    # Resource availability constraints - only include valid combinations
-    for resource in resources:
-        model += lpSum(allocations[c.id, resource.id] 
-                      for c in children 
-                      if (c.id, resource.id) in valid_combinations) <= float(resource.quantity)
-            
-    # Fairness constraints with type-specific handling
-    for resource in resources:
-        for child in children:
-            # Skip if gender-specific resource doesn't match child's gender
-            if (child.id, resource.id) not in valid_combinations:
-                continue
-                
-            # Base fairness constraint
-            model += allocations[child.id, resource.id] >= min_allocations[resource.type]
-            
-            # Fairness between children
-            for other_child in children:
-                # Skip comparisons with invalid combinations
-                if (other_child.id, resource.id) not in valid_combinations:
+            total_allocated = 0
+            for c in children:
+                if r.gender_specific != 'ALL' and c.gender != r.gender_specific:
                     continue
                     
-                if child != other_child:
-                    if resource.type in integral_types:
-                        # For integral resources, allow difference of at most 1 unit
-                        model += allocations[child.id, resource.id] <= allocations[other_child.id, resource.id] + 1
-                        model += allocations[child.id, resource.id] >= allocations[other_child.id, resource.id] - 1
-                    else:
-                        # For divisible resources, keep 20% tolerance
-                        model += allocations[child.id, resource.id] <= 1.2 * allocations[other_child.id, resource.id]
-                        model += allocations[child.id, resource.id] >= 0.8 * allocations[other_child.id, resource.id]
-    
-    # Minimum requirements constraints
-    for requirement in requirements:
-        total_available = float(requirement.resource.quantity)
-        min_per_child = total_available / len(children)
-        
-        for child in children:
-            if (child.id, requirement.resource.id) not in valid_combinations:
-                continue
-                
-            if requirement.resource.type in integral_types:
-                # For integral resources, round down the minimum requirement
-                model += allocations[child.id, requirement.resource.id] >= int(min(requirement.quantity_per_child, min_per_child))
-            else:
-                # For divisible resources, use exact values
-                model += allocations[child.id, requirement.resource.id] >= min(requirement.quantity_per_child, min_per_child)
-    
-    # Solve the model
-    model.solve()
-    
-    if model.status == 1:  # Optimal solution found
-        Allocation.objects.all().delete()
-        remaining_resources = {}
-        daily_requirements = {}
-        
-        # Calculate daily requirements per resource type
-        for requirement in requirements:
-            if requirement.frequency == 'DAILY':
-                resource = requirement.resource
-                daily_requirements[resource.id] = requirement.quantity_per_child * len(children)
-        
-        for child in children:
-            for resource in resources:
-                if resource.gender_specific != 'ALL' and child.gender != resource.gender_specific:
-                    continue
-
-                allocation_value = value(allocations[child.id, resource.id])
-                if allocation_value > 0:
-                    if resource.type in integral_types:
-                        allocation_value = round(allocation_value)
-                    
-                    # Create allocation
-                    Allocation.objects.create(
-                        child=child,
-                        resource=resource,
-                        quantity=allocation_value
+                if r.type in integral_types:
+                    allocations[c.id, r.name] = LpVariable(
+                        f"allocation_{c.id}_{r.name}", 
+                        lowBound=0,
+                        cat='Integer'
                     )
-                    
-                    # Track remaining resources
-                    if resource.id not in remaining_resources:
-                        remaining_resources[resource.id] = float(resource.quantity)
-                    remaining_resources[resource.id] -= allocation_value
-        
-        # Calculate days of food remaining
-        days_of_food = {}
-        for resource in resources:
-            if resource.type == 'FOOD' and resource.id in remaining_resources and resource.id in daily_requirements:
-                remaining = remaining_resources[resource.id]
-                daily_need = daily_requirements[resource.id]
-                days = int(remaining / daily_need) if daily_need > 0 else 0
-                days_of_food[resource.name] = {
-                    'remaining': remaining,
-                    'daily_need': daily_need,
-                    'days': days
-                }
-        
-        messages.success(request, "Resources allocated fairly and successfully!")
-        
-        # Add information about remaining resources
-        for resource_name, info in days_of_food.items():
-            messages.info(
-                request,
-                f"{resource_name}: {info['remaining']:.2f} units remaining. "
-                f"With daily requirement of {info['daily_need']:.2f} units, "
-                f"sufficient for {info['days']} days."
-            )
-    else:
-        messages.error(request, "Could not find optimal solution!")
-    
-    return redirect('allocation_list')
+                else:
+                    allocations[c.id, r.name] = LpVariable(
+                        f"allocation_{c.id}_{r.name}", 
+                        lowBound=0
+                    )
+                total_allocated += allocations[c.id, r.name]
+            
+            # Add constraint: total allocation cannot exceed available quantity
+            model += total_allocated <= r.quantity, f"Max_{r.name}"
 
-def allocation_list(request):
-    allocations = Allocation.objects.all().order_by('-date_allocated')
-    return render(request, 'allocation_list.html', {'allocations': allocations})
+        # Add requirement constraints
+        for req in requirements:
+            for c in children:
+                matching_resource = next((r for r in resources if r.name == req.resource_name), None)
+                if matching_resource:
+                    if matching_resource.gender_specific != 'ALL' and c.gender != matching_resource.gender_specific:
+                        continue
+                    model += allocations[c.id, req.resource_name] >= req.quantity_per_child, f"Min_{c.id}_{req.resource_name}"
+
+        # Objective: Minimize total allocation
+        model += lpSum(
+            allocations[c.id, r.name]
+            for c in children
+            for r in resources
+            if (c.id, r.name) in allocations
+        )
+
+        # Solve the model
+        model.solve()
+
+        if model.status == 1:  # Optimal solution found
+            allocation_results = []
+            
+            # Calculate allocation results
+            for child in children:
+                for resource in resources:
+                    if resource.gender_specific != 'ALL' and child.gender != resource.gender_specific:
+                        continue
+                    
+                    if (child.id, resource.name) in allocations:
+                        allocation_value = value(allocations[child.id, resource.name])
+                        if allocation_value > 0:
+                            if resource.type in integral_types:
+                                allocation_value = round(allocation_value)
+                            
+                            allocation_results.append({
+                                'child': child,
+                                'resource_name': resource.name,
+                                'quantity': allocation_value,
+                                'unit': resource.unit
+                            })
+
+            return render(request, 'allocation_results.html', {
+                'allocations': allocation_results
+            })
+        else:
+            messages.error(request, "Could not find optimal solution!")
+            return redirect('resource_input')
+            
+    except Exception as e:
+        messages.error(request, f"Error during optimization: {str(e)}")
+        return render(request, 'resource_input.html')
+
 
 class ChildCreateView(CreateView):
     model = Child
-    fields = ['name', 'age', 'admission_date']
+    fields = ['name', 'age', 'gender', 'admission_date']
     template_name = 'child_form.html'
     success_url = reverse_lazy('home')
 
@@ -179,34 +152,12 @@ class ChildCreateView(CreateView):
         messages.success(self.request, 'Child added successfully!')
         return super().form_valid(form)
 
-def update_donation(request, pk):
-    resource = get_object_or_404(Resource, pk=pk)
-    if request.method == 'POST':
-        quantity = float(request.POST.get('quantity', 0))
-        resource.quantity += quantity
-        resource.save()
-        messages.success(request, f'Added {quantity} {resource.unit} of {resource.name}')
-        return redirect('home')
-    return render(request, 'donation_form.html', {'resource': resource})
-
 def home(request):
     context = {
-        'children': Child.objects.all(),
-        'resources': Resource.objects.all(),
-        'allocations': Allocation.objects.all().order_by('-date_allocated')[:10],
-        'requirements': Requirement.objects.all()
+        'children': Child.objects.all()
     }
     return render(request, 'home.html', context)
 
-def reduce_resource(request, pk):
-    resource = get_object_or_404(Resource, pk=pk)
-    if request.method == 'POST':
-        quantity = float(request.POST.get('quantity', 0))
-        if quantity <= resource.quantity:
-            resource.quantity -= quantity
-            resource.save()
-            messages.success(request, f'Reduced {quantity} {resource.unit} from {resource.name}')
-            return redirect('home')
-        else:
-            messages.error(request, f'Cannot reduce more than available quantity ({resource.quantity} {resource.unit})')
-    return render(request, 'reduce_form.html', {'resource': resource})
+def resource_input(request):
+    return render(request, 'resource_input.html')
+
