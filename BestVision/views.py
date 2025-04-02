@@ -7,7 +7,7 @@ from django.views.generic.edit import CreateView
 from django.urls import reverse_lazy
 from dataclasses import dataclass
 from django.views.decorators.csrf import csrf_protect
-from django.utils.decorators import method_decorator
+from datetime import datetime, timedelta
 
 @dataclass
 class ResourceInput:
@@ -29,22 +29,19 @@ def optimize_resources(request):
         return render(request, 'resource_input.html')
 
     try:
-        # Parse JSON data
         resources_data = json.loads(request.POST.get('resources', '[]'))
         requirements_data = json.loads(request.POST.get('requirements', '[]'))
         
-        # Convert input to ResourceInput objects
         resources = [
             ResourceInput(
                 name=data['name'],
                 quantity=float(data['quantity']),
                 type=data['type'],
-                gender_specific=data['gender_specific'],
+                gender_specific=data['gender_specific'].upper(),  
                 unit=data['unit']
             ) for data in resources_data
         ]
 
-        # Convert input to RequirementInput objects
         requirements = [
             RequirementInput(
                 resource_name=data['resource_name'],
@@ -53,85 +50,114 @@ def optimize_resources(request):
             ) for data in requirements_data
         ]
 
-        # Create optimization model
         model = LpProblem("Orphanage_Resource_Allocation", LpMinimize)
-        
-        # Get children from database
         children = Child.objects.all()
-        
-        # Separate integral and divisible resources
         integral_types = ['CLOTHING', 'EDUCATION']
-        
-        # Decision variables
         allocations = {}
-        
-        # Create variables and add constraints
-        for r in resources:
+
+        # Create variables for valid child-resource pairs
+        for resource in resources:
             total_allocated = 0
-            for c in children:
-                if r.gender_specific != 'ALL' and c.gender != r.gender_specific:
-                    continue
-                    
-                if r.type in integral_types:
-                    allocations[c.id, r.name] = LpVariable(
-                        f"allocation_{c.id}_{r.name}", 
-                        lowBound=0,
-                        cat='Integer'
-                    )
-                else:
-                    allocations[c.id, r.name] = LpVariable(
-                        f"allocation_{c.id}_{r.name}", 
-                        lowBound=0
-                    )
-                total_allocated += allocations[c.id, r.name]
+            for child in children:
+                child_gender = child.gender.upper()
+                resource_gender = resource.gender_specific.upper()
+                
+                # Only create variables for valid gender combinations
+                if resource_gender == 'ALL' or child_gender == resource_gender:
+                    var_name = f"allocation_{child.id}_{resource.name}"
+                    if resource.type in integral_types:
+                        allocations[(child.id, resource.name)] = LpVariable(
+                            var_name, 
+                            lowBound=0,
+                            cat='Integer'
+                        )
+                    else:
+                        allocations[(child.id, resource.name)] = LpVariable(
+                            var_name, 
+                            lowBound=0
+                        )
+                    total_allocated += allocations[(child.id, resource.name)]
             
-            # Add constraint: total allocation cannot exceed available quantity
-            model += total_allocated <= r.quantity, f"Max_{r.name}"
+            # Add resource quantity constraint
+            if total_allocated != 0:  # Only add constraint if variables were created
+                model += total_allocated <= resource.quantity, f"Max_{resource.name}"
 
-        # Add requirement constraints
+        # Add requirements constraints
         for req in requirements:
-            for c in children:
-                matching_resource = next((r for r in resources if r.name == req.resource_name), None)
-                if matching_resource:
-                    if matching_resource.gender_specific != 'ALL' and c.gender != matching_resource.gender_specific:
-                        continue
-                    model += allocations[c.id, req.resource_name] >= req.quantity_per_child, f"Min_{c.id}_{req.resource_name}"
+            matching_resource = next((r for r in resources if r.name == req.resource_name), None)
+            if matching_resource:
+                for child in children:
+                    child_gender = child.gender.upper()
+                    resource_gender = matching_resource.gender_specific.upper()
+                    
+                    if resource_gender == 'ALL' or child_gender == resource_gender:
+                        key = (child.id, req.resource_name)
+                        if key in allocations:
+                            model += allocations[key] >= req.quantity_per_child, f"Min_{child.id}_{req.resource_name}"
 
-        # Objective: Minimize total allocation
+        # Objective function - minimize total allocation
         model += lpSum(
-            allocations[c.id, r.name]
-            for c in children
-            for r in resources
-            if (c.id, r.name) in allocations
+            allocations[key] for key in allocations.keys()
         )
 
         # Solve the model
-        model.solve()
+        status = model.solve()
 
-        if model.status == 1:  # Optimal solution found
+        if status == 1:  # Optimal solution found
             allocation_results = []
+            resource_exhaustion = {}
+            resource_totals = {r.name: 0 for r in resources}  # Initialize all resource totals
             
-            # Calculate allocation results
-            for child in children:
-                for resource in resources:
-                    if resource.gender_specific != 'ALL' and child.gender != resource.gender_specific:
-                        continue
+            # Process allocations
+            for (child_id, resource_name), var in allocations.items():
+                allocation_value = value(var)
+                if allocation_value > 0:
+                    child = next(c for c in children if c.id == child_id)
+                    resource = next(r for r in resources if r.name == resource_name)
                     
-                    if (child.id, resource.name) in allocations:
-                        allocation_value = value(allocations[child.id, resource.name])
-                        if allocation_value > 0:
-                            if resource.type in integral_types:
-                                allocation_value = round(allocation_value)
-                            
-                            allocation_results.append({
-                                'child': child,
-                                'resource_name': resource.name,
-                                'quantity': allocation_value,
-                                'unit': resource.unit
-                            })
+                    if resource.type in integral_types:
+                        allocation_value = round(allocation_value)
+                    
+                    resource_totals[resource_name] += allocation_value
+                    
+                    allocation_results.append({
+                        'child': child,
+                        'resource_name': resource_name,
+                        'quantity': allocation_value,
+                        'unit': resource.unit
+                    })
+            
+            # Calculate resource exhaustion
+            for resource in resources:
+                total_allocated = resource_totals.get(resource.name, 0)
+                if total_allocated > 0:
+                    requirement = next(
+                        (req for req in requirements if req.resource_name == resource.name),
+                        None
+                    )
+                    
+                    if requirement:
+                        if requirement.frequency == 'DAILY':
+                            daily_usage = total_allocated
+                        elif requirement.frequency == 'WEEKLY':
+                            daily_usage = total_allocated / 7
+                        else:
+                            daily_usage = total_allocated / 30
+                        
+                        days_left = int(resource.quantity / daily_usage)
+                        exhaustion_date = datetime.now() + timedelta(days=days_left)
+                        
+                        resource_exhaustion[resource.name] = {
+                            'days_left': days_left,
+                            'exhaustion_date': exhaustion_date.strftime('%Y-%m-%d'),
+                            'daily_usage': daily_usage,
+                            'unit': resource.unit
+                        }
 
             return render(request, 'allocation_results.html', {
-                'allocations': allocation_results
+                'allocations': allocation_results,
+                'resource_exhaustion': resource_exhaustion,
+                'resources': resources,
             })
         else:
             messages.error(request, "Could not find optimal solution!")
@@ -160,4 +186,3 @@ def home(request):
 
 def resource_input(request):
     return render(request, 'resource_input.html')
-

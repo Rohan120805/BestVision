@@ -2,24 +2,50 @@
 
 {% block content %}
 <div class="container">
-    <h2>Optimization Results</h2>
+    <h2>Resource Allocation Results</h2>
     
     <div class="section">
-        <h3>Resource Allocations</h3>
-        <table>
+        <h3>Allocations</h3>
+
+        <div class="filters">
+            <select id="genderFilter">
+                <option value="">All Genders</option>
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+            </select>
+            
+            <select id="resourceFilter">
+                <option value="">All Resources</option>
+                {% for resource in resources %}
+                    <option value="{{ resource.name }}">{{ resource.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <table class="table" id="allocationsTable">
             <thead>
                 <tr>
                     <th>Child</th>
+                    <th>Gender</th>
                     <th>Resource</th>
-                    <th>Allocated Quantity</th>
+                    <th>Gender Specific</th>
+                    <th>Quantity</th>
                     <th>Unit</th>
                 </tr>
             </thead>
             <tbody>
                 {% for allocation in allocations %}
-                <tr>
+                <tr class="allocation-row">
                     <td>{{ allocation.child.name }}</td>
-                    <td>{{ allocation.resource_name }}</td>
+                    <td class="gender-cell">{{ allocation.child.gender }}</td>
+                    <td class="resource-cell">{{ allocation.resource_name }}</td>
+                    <td>
+                        {% for resource in resources %}
+                            {% if resource.name == allocation.resource_name %}
+                                {{ resource.gender_specific }}
+                            {% endif %}
+                        {% endfor %}
+                    </td>
                     <td>{{ allocation.quantity }}</td>
                     <td>{{ allocation.unit }}</td>
                 </tr>
@@ -28,7 +54,119 @@
         </table>
     </div>
 
-    <a href="{% url 'resource_input' %}" class="button">New Optimization</a>
-    <a href="{% url 'home' %}" class="button">Back to Home</a>
+    <div class="section">
+        <h3>Resource Summary</h3>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Resource</th>
+                    <th>Gender Specific</th>
+                    <th>Daily Usage</th>
+                    <th>Days Until Exhaustion</th>
+                    <th>Exhaustion Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for resource_name, info in resource_exhaustion.items %}
+                <tr>
+                    <td>{{ resource_name }}</td>
+                    <td>
+                        {% for resource in resources %}
+                            {% if resource.name == resource_name %}
+                                {{ resource.gender_specific }}
+                            {% endif %}
+                        {% endfor %}
+                    </td>
+                    <td>{{ info.daily_usage|floatformat:2 }} {{ info.unit }}/day</td>
+                    <td>
+                        {% if info.days_left <= 7 %}
+                            <span class="warning">{{ info.days_left }} days</span>
+                        {% else %}
+                            {{ info.days_left }} days
+                        {% endif %}
+                    </td>
+                    <td>{{ info.exhaustion_date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <style>
+        .warning {
+            color: red;
+            font-weight: bold;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        .table th, .table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .table th {
+            background-color: #f5f5f5;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .filters {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .filters select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .allocation-row.hidden {
+            display: none;
+        }
+    </style>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const genderFilter = document.getElementById('genderFilter');
+            const resourceFilter = document.getElementById('resourceFilter');
+            const table = document.getElementById('allocationsTable');
+            
+            if (!table) return; // Guard clause if table not found
+
+            const rows = table.querySelectorAll('.allocation-row');
+
+            function filterTable() {
+                const selectedGender = genderFilter.value.toUpperCase();
+                const selectedResource = resourceFilter.value;
+
+                rows.forEach(row => {
+                    const genderCell = row.querySelector('.gender-cell');
+                    const resourceCell = row.querySelector('.resource-cell');
+                    
+                    if (!genderCell || !resourceCell) return;
+
+                    const gender = genderCell.textContent.trim().toUpperCase();
+                    const resource = resourceCell.textContent.trim();
+                    
+                    const genderMatch = !selectedGender || gender === selectedGender;
+                    const resourceMatch = !selectedResource || resource === selectedResource;
+
+                    row.style.display = genderMatch && resourceMatch ? '' : 'none';
+                });
+            }
+
+            genderFilter.addEventListener('change', filterTable);
+            resourceFilter.addEventListener('change', filterTable);
+            filterTable();
+        });
+    </script>
+
+    <div class="actions">
+        <a href="{% url 'resource_input' %}" class="button">New Optimization</a>
+        <a href="{% url 'home' %}" class="button">Back to Home</a>
+    </div>
 </div>
 {% endblock %}
